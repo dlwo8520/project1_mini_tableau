@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import axios from 'axios';
 import ReactECharts from 'echarts-for-react';
@@ -13,10 +13,13 @@ export default function UploadChart() {
 
   // 차트 설정 상태
   const [chartType, setChartType] = useState('bar');
+  const [category, setCategory] = useState('');      // ← 범주형 그룹 변수
   const [binCount, setBinCount] = useState(10);     // histogram용 구간 수
   const [xAxis, setXAxis] = useState('');
   const [yAxis, setYAxis] = useState('');
   const [chartOption, setChartOption] = useState();
+
+
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: { 'text/csv': ['.csv'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx', '.xls'] },
@@ -42,45 +45,164 @@ export default function UploadChart() {
     }
   });
 
- const drawChart = () => {
-    const values = rawData.map(r => r[yAxis]);
-    let option = {};
+  // drawChart 함수만 발췌
 
-    switch (chartType) {
-      case 'histogram': {
-        // binCount 를 적용
-        const { categories, data } = makeHistogram(values, binCount);
-        option = {
-          xAxis: { type: 'category', data: categories },
-          yAxis: { type: 'value' },
-          series: [{ type: 'bar', data }]
-        };
-        break;
-      }
-      case 'boxplot': {
-        const boxData = makeBoxplot(values);
-        option = {
-          xAxis: { type: 'category', data: [''] },
-          yAxis: { type: 'value' },
-          series: [{ type: 'boxplot', data: [boxData] }]
-        };
-        break;
-      }
-      default: {
-        const xData = rawData.map(r => r[xAxis]);
-        const yData = rawData.map(r => r[yAxis]);
-        option = {
-          xAxis: { type: 'category', data: xData },
-          yAxis: { type: 'value' },
-          tooltip: {},
-          series: [{ type: chartType, data: yData }],
-          grid: { containLabel: true }
-        };
-      }
+const drawChart = () => {
+    const data = rawData;
+    // 전체 모드: 그룹 미선택 혹은 그룹 변수와 X축이 같으면 groups = []
+    const groups = (category && category !== xAxis)
+      ? [...new Set(data.map(r => r[category]))]
+      : [];
+  
+    let option;
+  
+    if (chartType === 'histogram') {
+      const { categories, data: histData } = makeHistogram(data.map(r => r[yAxis]), binCount);
+      option = {
+        xAxis: { type: 'category', data: categories },
+        yAxis: { type: 'value' },
+        series: [{ type: 'bar', data: histData }],
+        tooltip: {},
+        grid: { containLabel: true },
+        legend: { show: false },          // 범례 숨김
+      };
     }
+    else if (chartType === 'boxplot') {
+      const boxData = makeBoxplot(data.map(r => r[yAxis]));
+      option = {
+        xAxis: { type: 'category', data: [''] },
+        yAxis: { type: 'value' },
+        series: [{ type: 'boxplot', data: [boxData] }],
+        tooltip: {},
+        grid: { containLabel: true },
+        legend: { show: false },          // 범례 숨김
+      };
+    }
+    else if (groups.length > 0 && chartType !== 'pie') {
+      // 그룹별 바/선/산점도
+      const xData = [...new Set(data.map(r => r[xAxis]))];
+      const series = groups.map(g => ({
+        name: g,
+        type: chartType,
+        data: xData.map(x =>
+          data.filter(r => r[category] === g && r[xAxis] === x)
+              .map(r => r[yAxis])[0] ?? null
+        )
+      }));
+      option = {
+        xAxis: { type: 'category', data: xData },
+        yAxis: { type: 'value' },
+        series,
+        tooltip: { trigger: 'axis' },
+        legend: { show: true, data: groups },  // 그룹 모드에만 범례 표시
+        grid: { containLabel: true },
+      };
+    }
+    else if (chartType === 'pie' && groups.length > 0) {
+      // 그룹별 파이 차트
+      const agg = groups.map(g => ({
+        name: g,
+        value: data
+          .filter(r => r[category] === g)
+          .reduce((sum, r) => sum + r[yAxis], 0)
+      }));
+      option = {
+        tooltip: {},
+        legend: { show: true, data: groups },
+        series: [{
+          name: yAxis,
+          type: 'pie',
+          radius: '50%',
+          data: agg
+        }]
+      };
+    }
+/* ─────────────────────────────────────────────
+     A) 그룹 + scatter  →  [x,y] 점 배열
+  ───────────────────────────────────────────── */
+  else if (groups.length > 0 && chartType === 'scatter') {
+    const series = groups.map(g => ({
+      name: g,
+      type: 'scatter',
+      data: data
+        .filter(r => r[category] === g)
+        .map(r => [r[xAxis], r[yAxis]]),
+    }));
+    option = {
+      xAxis: { type: 'value', name: xAxis },
+      yAxis: { type: 'value', name: yAxis },
+      series,
+      tooltip: { trigger: 'item' },
+      legend: { data: groups },
+      grid: { containLabel: true },
+    };
+  }
+  /* ─────────────────────────────────────────────
+     B) 그룹 없음 + scatter  →  단일 시리즈 점 배열
+  ───────────────────────────────────────────── */
+  else if (groups.length === 0 && chartType === 'scatter') {
+    option = {
+      xAxis: { type: 'value', name: xAxis },
+      yAxis: { type: 'value', name: yAxis },
+      series: [{
+        type: 'scatter',
+        data: data.map(r => [r[xAxis], r[yAxis]]),
+      }],
+      tooltip: { trigger: 'item' },
+      legend: { show: false },
+      grid: { containLabel: true },
+    };
+  }
+    /* 4. 바로 여기! ▸ bar/line + 그룹 */
+  else if (groups.length > 0 && ['bar','line'].includes(chartType)) {
+    // ⬇⬇ 여기에 붙여 넣으세요 ⬇⬇
+    const xData = [...new Set(data.map(r => r[xAxis]))];
+    const series = groups.map(g => ({
+      name: g,
+      type: chartType,
+      data: xData.map(x => {
+        const ys = data
+          .filter(r => r[category] === g && r[xAxis] === x)
+          .map(r => r[yAxis]);
+        return ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : null; // 평균
+      }),
+    }));
+    option = {
+      xAxis: { type: 'category', data: xData },
+      yAxis: { type: 'value' },
+      series,
+      tooltip: { trigger: 'axis' },
+      legend: { data: groups },
+      grid: { containLabel: true },
+    };
+    }
+    else {
+      // 전체(그룹 미선택)
+      const xData = data.map(r => r[xAxis]);
+      const yData = data.map(r => r[yAxis]);
+      option = {
+        xAxis: { type: 'category', data: xData },
+        yAxis: { type: 'value' },
+        series: [{
+          type: chartType,
+          data: yData
+        }],
+        tooltip: {},
+        grid: { containLabel: true },
+        legend: { show: false },          // 전체 모드에선 범례 숨김
+      };
+    }
+  
+   // drawChart 함수 안 마지막 줄만 교체
+   // 1) 먼저 null 로 초기화
+   setChartOption(null);
+   // 2) 다음 이벤트 루프에서 새 옵션 적용
+   setTimeout(() => setChartOption(option), 0);
 
-    setChartOption(option);
   };
+  
+  
+  
   return (
     <div className="p-6 max-w-xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">Mini Tableau</h1>
@@ -167,6 +289,25 @@ export default function UploadChart() {
         </div>
       )}
 
+      {columns.length > 0 && (
+       <div className="mt-4">
+         <label className="block mb-1 font-medium">그룹 변수(범주형)</label>
+         <select
+           className="border p-1 rounded"
+           value={category}
+           onChange={e => setCategory(e.target.value)}
+         >
+           <option value="">전체</option>
+           {columns
+             .filter(c => c.dtype === 'object' && c.name !== xAxis)
+             .map(c => (
+               <option key={c.name} value={c.name}>{c.name}</option>
+             ))
+           }
+         </select>
+       </div>
+     )}
+
       {/* 차트 그리기 버튼 */}
       {columns.length > 0 && (
         <button
@@ -184,7 +325,11 @@ export default function UploadChart() {
       {/* 차트 렌더링 */}
       {chartOption && (
         <div className="mt-6">
-          <ReactECharts option={chartOption} style={{ height: 400 }} />
+          <ReactECharts
+            key="main-chart"   // 또는 chartType 하나만 넣어도 OK
+            option={chartOption}
+            style={{ height: 400 }}
+          />
         </div>
       )}
     </div>
