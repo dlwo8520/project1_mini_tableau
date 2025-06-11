@@ -78,26 +78,6 @@ const drawChart = () => {
         legend: { show: false },          // 범례 숨김
       };
     }
-    else if (groups.length > 0 && chartType !== 'pie') {
-      // 그룹별 바/선/산점도
-      const xData = [...new Set(data.map(r => r[xAxis]))];
-      const series = groups.map(g => ({
-        name: g,
-        type: chartType,
-        data: xData.map(x =>
-          data.filter(r => r[category] === g && r[xAxis] === x)
-              .map(r => r[yAxis])[0] ?? null
-        )
-      }));
-      option = {
-        xAxis: { type: 'category', data: xData },
-        yAxis: { type: 'value' },
-        series,
-        tooltip: { trigger: 'axis' },
-        legend: { show: true, data: groups },  // 그룹 모드에만 범례 표시
-        grid: { containLabel: true },
-      };
-    }
     else if (chartType === 'pie' && groups.length > 0) {
       // 그룹별 파이 차트
       const agg = groups.map(g => ({
