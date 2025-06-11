@@ -1,46 +1,8 @@
-// src/components/UploadChart.jsx
-
 import React, { useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import axios from 'axios';
-
-// ECharts core + 플러그인 등록
-import * as echarts from 'echarts/core';
-import {
-  BarChart,
-  LineChart,
-  PieChart,
-  ScatterChart,
-  BoxplotChart
-} from 'echarts/charts';
-import {
-  GridComponent,
-  TooltipComponent,
-  LegendComponent
-} from 'echarts/components';
-import { CanvasRenderer } from 'echarts/renderers';
-import ecStat from 'echarts-stat/dist/ecStat';
-
-echarts.use([
-  BarChart,
-  LineChart,
-  PieChart,
-  ScatterChart,
-  BoxplotChart,
-  // Violin/Histo 는 ecStat transform 으로 처리
-  GridComponent,
-  TooltipComponent,
-  LegendComponent,
-  CanvasRenderer,
-  ecStat.default
-]);
-
 import ReactECharts from 'echarts-for-react';
-
-// 이하 생략: drawChart 로직까지 동일
-
-
-
+import { makeHistogram, makeBoxplot } from '../utils/stats';
 
 export default function UploadChart() {
   // 업로드 상태
@@ -51,32 +13,26 @@ export default function UploadChart() {
 
   // 차트 설정 상태
   const [chartType, setChartType] = useState('bar');
+  const [binCount, setBinCount] = useState(10);     // histogram용 구간 수
   const [xAxis, setXAxis] = useState('');
   const [yAxis, setYAxis] = useState('');
   const [chartOption, setChartOption] = useState();
 
-  // 파일 업로드
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    accept: {
-      'text/csv': ['.csv'],
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx', '.xls'],
-    },
+    accept: { 'text/csv': ['.csv'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx', '.xls'] },
     multiple: false,
-    onDrop: async (files) => {
+    onDrop: async files => {
       const file = files[0];
       const fd = new FormData();
       fd.append('file', file);
       try {
-        const res = await axios.post(
-          'http://127.0.0.1:8000/api/upload/',
-          fd,
-          { headers: { 'Content-Type': 'multipart/form-data' } }
-        );
+        const res = await axios.post('http://127.0.0.1:8000/api/upload/', fd, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
         setRows(res.data.rows);
         setColumns(res.data.columns);
         setRawData(res.data.data || []);
         setError('');
-        // 초기화
         setXAxis('');
         setYAxis('');
         setChartOption(undefined);
@@ -86,93 +42,56 @@ export default function UploadChart() {
     }
   });
 
-  // 차트 그리기
-  const drawChart = () => {
+ const drawChart = () => {
+    const values = rawData.map(r => r[yAxis]);
     let option = {};
-    const data = rawData;
+
     switch (chartType) {
-      case 'pie':
+      case 'histogram': {
+        // binCount 를 적용
+        const { categories, data } = makeHistogram(values, binCount);
         option = {
-          tooltip: {},
-          series: [{
-            type: 'pie',
-            radius: '50%',
-            data: data.map(r => ({ name: r[xAxis], value: r[yAxis] }))
-          }]
+          xAxis: { type: 'category', data: categories },
+          yAxis: { type: 'value' },
+          series: [{ type: 'bar', data }]
         };
         break;
-        case 'histogram':
-            option = {
-              dataset: [{
-                source: data.map(r => r[yAxis])
-              }],
-              series: [{
-                type: 'histogram',
-                encode: { value: 0 },
-                // transform으로 bins 자동 계산
-                transform: { type: 'ecStat:histogram', config: {} }
-              }]
-            };
-            break;
-          
-          case 'boxplot':
-            option = {
-              dataset: [{
-                source: data.map(r => r[yAxis])
-              }],
-              series: [{
-                type: 'boxplot',
-                encode: { value: 0 },
-                transform: { type: 'ecStat:boxplot', config: {} }
-              }]
-            };
-            break;
-          
-          case 'violin':
-            option = {
-              dataset: [{
-                source: data.map(r => r[yAxis])
-              }],
-              series: [{
-                type: 'violin',
-                encode: { value: 0 },
-                transform: { type: 'ecStat:violin', config: {} }
-              }]
-            };
-            break;
-          
-      default:
-        // bar, line, scatter
+      }
+      case 'boxplot': {
+        const boxData = makeBoxplot(values);
         option = {
-          xAxis: { type: 'category', data: data.map(r => r[xAxis]) },
+          xAxis: { type: 'category', data: [''] },
+          yAxis: { type: 'value' },
+          series: [{ type: 'boxplot', data: [boxData] }]
+        };
+        break;
+      }
+      default: {
+        const xData = rawData.map(r => r[xAxis]);
+        const yData = rawData.map(r => r[yAxis]);
+        option = {
+          xAxis: { type: 'category', data: xData },
           yAxis: { type: 'value' },
           tooltip: {},
-          series: [{
-            type: chartType,
-            data: data.map(r => r[yAxis])
-          }],
+          series: [{ type: chartType, data: yData }],
           grid: { containLabel: true }
         };
+      }
     }
+
     setChartOption(option);
   };
-
-  // 렌더링
   return (
     <div className="p-6 max-w-xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">Mini Tableau</h1>
-
-      {/* 1) 파일 업로드 */}
       <div
         {...getRootProps()}
-        className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-blue-500"
+        className="border-2 border-dashed rounded-lg p-8 text-center hover:border-blue-500 cursor-pointer"
       >
         <input {...getInputProps()} />
-        {isDragActive ? '드롭하세요' : 'CSV/Excel 파일을 드래그 또는 클릭해 업로드'}
+        {isDragActive ? '드롭하세요' : 'CSV/Excel 파일 드래그 또는 클릭'}
       </div>
       {error && <p className="text-red-500 mt-2">{error}</p>}
-
-      {/* 2) 업로드 요약 */}
       {rows !== null && (
         <div className="mt-4">
           <p>총 행 수: <strong>{rows}</strong></p>
@@ -184,8 +103,7 @@ export default function UploadChart() {
         </div>
       )}
 
-      {/* 3) 차트 유형 선택 */}
-      {columns.length > 0 && (
+{columns.length > 0 && (
         <div className="mt-6">
           <label className="block mb-1 font-medium">차트 유형</label>
           <select
@@ -193,43 +111,54 @@ export default function UploadChart() {
             value={chartType}
             onChange={e => setChartType(e.target.value)}
           >
-            <option value="bar">막대그래프</option>
-            <option value="line">선그래프</option>
+            <option value="bar">막대</option>
+            <option value="line">선</option>
             <option value="scatter">산점도</option>
-            <option value="pie">파이차트</option>
+            <option value="pie">파이</option>
             <option value="histogram">히스토그램</option>
             <option value="boxplot">박스플롯</option>
-            <option value="violin">바이올린</option>
           </select>
         </div>
       )}
 
-      {/* 4) 변수 선택 (X/Y or Y만) */}
+      {/* 히스토그램 구간 수 입력 */}
+      {chartType === 'histogram' && (
+        <div className="mt-4">
+          <label className="block mb-1">구간(bin) 개수</label>
+          <input
+            type="number"
+            min={1}
+            value={binCount}
+            onChange={e => setBinCount(Number(e.target.value))}
+            className="w-24 border p-1 rounded"
+          />
+        </div>
+      )}
+
+      {/* 변수 선택 (X/Y or Y만) */}
       {chartType && columns.length > 0 && (
         <div className="mt-4 grid grid-cols-2 gap-4">
-          {(chartType !== 'histogram' && chartType !== 'boxplot' && chartType !== 'violin') && (
+          {['bar','line','scatter','pie'].includes(chartType) && (
             <div>
-              <label className="block mb-1 font-medium">X축 변수</label>
+              <label className="block mb-1">X축</label>
               <select
                 className="w-full border p-1 rounded"
                 value={xAxis}
                 onChange={e => setXAxis(e.target.value)}
               >
-                <option value="">선택하세요</option>
-                {columns.map(c => (
-                  <option key={c.name} value={c.name}>{c.name}</option>
-                ))}
+                <option value="">선택</option>
+                {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
               </select>
             </div>
           )}
           <div>
-            <label className="block mb-1 font-medium">Y축 변수</label>
+            <label className="block mb-1">Y축</label>
             <select
               className="w-full border p-1 rounded"
               value={yAxis}
               onChange={e => setYAxis(e.target.value)}
             >
-              <option value="">선택하세요</option>
+              <option value="">선택</option>
               {columns.filter(c => c.dtype !== 'object').map(c => (
                 <option key={c.name} value={c.name}>{c.name}</option>
               ))}
@@ -238,7 +167,7 @@ export default function UploadChart() {
         </div>
       )}
 
-      {/* 5) 차트 그리기 버튼 */}
+      {/* 차트 그리기 버튼 */}
       {columns.length > 0 && (
         <button
           className="mt-4 px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
@@ -252,7 +181,7 @@ export default function UploadChart() {
         </button>
       )}
 
-      {/* 6) 차트 렌더링 */}
+      {/* 차트 렌더링 */}
       {chartOption && (
         <div className="mt-6">
           <ReactECharts option={chartOption} style={{ height: 400 }} />
