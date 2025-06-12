@@ -32,3 +32,25 @@ module.exports = {
     },
   },
 };
+export default {
+  content: ["./index.html", "./src/**/*.{js,jsx,ts,tsx}"],
+  theme: {
+    extend: {
+      colors: {
+        primary: {
+          50:  "#eef4ff",
+          100: "#dbe3ff",
+          300: "#6a8cff",
+          500: "#3b5bff",
+        },
+      },
+      fontFamily: {
+        sans: ["Inter", "Pretendard", "sans-serif"],
+      },
+      boxShadow: {
+        card: "0 4px 16px rgba(0,0,0,0.06)",
+      },
+    },
+  },
+  plugins: [],
+};

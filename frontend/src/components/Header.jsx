@@ -1,15 +1,19 @@
+import { Cat } from "lucide-react";
+
 export default function Header() {
   return (
-    <header className="bg-gradient-to-r from-primary-600 to-primary-700 text-white shadow-lg">
-      <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-        {/* 브랜드 */}
-        <h1 className="text-2xl md:text-3xl font-heading tracking-tight">
-          Mini <span className="text-accent">Tableau</span>
-        </h1>
-
-        {/* (선택) 다크모드 토글 자리 */}
-        {/* <button …>🌙</button> */}
+    <header className="h-14 flex items-center justify-between px-6 shadow-sm">
+      <div className="flex items-center gap-2">
+        <Cat className="h-6 w-6 text-primary-600" />
+        <span className="font-semibold">Mini Tableau</span>
       </div>
+
+      {/* 예시 아바타 */}
+      <img
+        src="/avatar.jpg"
+        alt="user"
+        className="h-8 w-8 rounded-full border object-cover"
+      />
     </header>
   );
 }
