@@ -3,25 +3,37 @@ import { UploadCloud } from "lucide-react";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 
 export default function UploadSidebar({ columns, onFile }) {
-  /* 드래그 & 드롭 */
+  /* 드래그 & 드롭 설정 */
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    accept: { "text/csv": [], "application/vnd.ms-excel": [] },
+    accept: {
+      "text/csv": [],
+      "application/vnd.ms-excel": []
+    },
     multiple: false,
-    onDrop: files => onFile(files[0]),
+    onDrop: files => onFile(files[0])
   });
 
   return (
     <aside className="w-64 shrink-0 flex flex-col gap-4 self-stretch">
-      <Card className="space-y-4 shadow-card">
-        {/* 업로드 */}
-        <CardHeader className="text-sm"></CardHeader>
+      <Card className="p-4 shadow-card rounded-2xl flex flex-col h-full">
+        {/* 업로드 박스 */}
         <CardContent>
           <div
             {...getRootProps()}
-            className="h-32 flex flex-col items-center justify-center gap-2
-                       rounded-xl border-2 border-dashed border-primary-300/70
-                       bg-primary-50/30 text-xs text-primary-700
-                       hover:bg-primary-50/60 transition-colors cursor-pointer"
+            className="
+              w-full
+              min-h-[160px]            /* 최소 높이로 충분한 내부 공간 확보 */
+              flex flex-col items-center justify-center
+              gap-4                   /* 아이콘 ↔ 텍스트 간격 */
+              px-6 py-8               /* 좌우/상하 패딩 추가 */
+              rounded-xl
+              border-2 border-dashed border-primary-300/70
+              bg-primary-50/30
+              text-xs text-primary-700
+              hover:bg-primary-50/60
+              transition-colors
+              cursor-pointer
+            "
           >
             <input {...getInputProps()} />
             <UploadCloud className="h-5 w-5 text-primary-500" />

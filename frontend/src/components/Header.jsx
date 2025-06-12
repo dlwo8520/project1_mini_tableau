@@ -1,17 +1,30 @@
+// src/components/Header.jsx
+import React from "react";
 import { Cat } from "lucide-react";
 
 export default function Header() {
   return (
-    <header className="h-14 flex items-center justify-between px-6 mb-4">
-      {/* 로고 + 제목 */}
-      <div className="flex items-center gap-2">
-        <Cat className="h-6 w-6 text-primary-600" />
-        <span className="font-semibold text-lg">Mini Tableau</span>
-      </div>
-
-      {/* (원한다면) 잔고 · 아바타 영역 */}
-      <div className="flex items-center gap-3">
-        {/* … */}
+    <header
+      className="
+        w-full 
+        bg-white 
+        shadow-card 
+        py-32           /* 상하 8rem 패딩 */
+        px-6 
+        min-h-[6rem]   /* 최소 높이 12rem 보장 */
+      "
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "16px"    /* 아이콘↔텍스트 간격 16px */
+        }}
+      >
+        <Cat size={40} className="text-primary-500" />
+        <h1 className="text-3xl font-semibold text-primary-600">
+          Mini Cat
+        </h1>
       </div>
     </header>
   );
