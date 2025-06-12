@@ -1,71 +1,56 @@
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectItem,
-  SelectContent,
-} from "@/components/ui/select";
 
 export default function ConfigSidebar({ columns, config, setConfig }) {
-  const numCols = columns?.filter(c => c.dtype !== "object") ?? [];
+  const numCols   = columns?.filter(c => c.dtype !== "object") ?? [];
+  const textCols  = columns?.filter(c => c.dtype === "object") ?? [];
 
   return (
     <aside className="w-64 shrink-0 flex flex-col gap-4 self-stretch">
-      <Card className="shadow-card">
+      <Card className="shadow-card space-y-3">
         <CardHeader className="text-sm">그래프 설정</CardHeader>
-        <CardContent className="space-y-4 text-sm">
-
+        <CardContent className="space-y-2 text-xs">
           {/* 차트 타입 */}
-          <div>
-            <label className="block mb-1 text-xs">차트 종류</label>
-            <Select
+          <label className="block">
+            <span className="block mb-[2px]">차트 종류</span>
+            <select
+              className="w-full h-8 rounded border"
               value={config.type}
-              onValueChange={v => setConfig(c => ({ ...c, type: v }))}
+              onChange={e => setConfig(c => ({ ...c, type: e.target.value }))}
             >
-              <SelectTrigger className="h-8 text-xs" />
-              <SelectContent>
-                {["bar", "line", "scatter"].map(t => (
-                  <SelectItem key={t} value={t} className="text-xs">
-                    {t}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+              {["bar","line","scatter"].map(t => (
+                <option key={t}>{t}</option>
+              ))}
+            </select>
+          </label>
 
-          {/* 축 선택 (데이터 업로드 후) */}
-          {columns && (
-            <>
-              <div>
-                <label className="block mb-1 text-xs">X 축</label>
-                <select
-                  value={config.x}
-                  onChange={e => setConfig(c => ({ ...c, x: e.target.value }))}
-                  className="w-full h-8 border rounded text-xs"
-                >
-                  <option value="">선택</option>
-                  {columns.map(c => (
-                    <option key={c.name}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
+          {/* X, Y 축 */}
+          <label className="block">
+            <span className="block mb-[2px]">X 축</span>
+            <select
+              className="w-full h-8 rounded border"
+              value={config.x}
+              onChange={e => setConfig(c => ({ ...c, x: e.target.value }))}
+            >
+              <option value="">선택</option>
+              {columns?.map(c => (
+                <option key={c.name}>{c.name}</option>
+              ))}
+            </select>
+          </label>
 
-              <div>
-                <label className="block mb-1 text-xs">Y 축</label>
-                <select
-                  value={config.y}
-                  onChange={e => setConfig(c => ({ ...c, y: e.target.value }))}
-                  className="w-full h-8 border rounded text-xs"
-                >
-                  <option value="">선택</option>
-                  {numCols.map(c => (
-                    <option key={c.name}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-            </>
-          )}
+          <label className="block">
+            <span className="block mb-[2px]">Y 축</span>
+            <select
+              className="w-full h-8 rounded border"
+              value={config.y}
+              onChange={e => setConfig(c => ({ ...c, y: e.target.value }))}
+            >
+              <option value="">선택</option>
+              {columns?.map(c => (
+                <option key={c.name}>{c.name}</option>
+              ))}
+            </select>
+          </label>
         </CardContent>
       </Card>
     </aside>
