@@ -1,211 +1,279 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useDropzone } from 'react-dropzone';
 import axios from 'axios';
 import ReactECharts from 'echarts-for-react';
 import { makeHistogram, makeBoxplot } from '../utils/stats';
 
 export default function UploadChart() {
-  // 업로드 상태
+  /* ──────────────────── 상태 ──────────────────── */
   const [columns, setColumns] = useState([]);
   const [rows, setRows] = useState(null);
   const [rawData, setRawData] = useState([]);
   const [error, setError] = useState('');
 
-  // 차트 설정 상태
   const [chartType, setChartType] = useState('bar');
-  const [category, setCategory] = useState('');      // ← 범주형 그룹 변수
-  const [binCount, setBinCount] = useState(10);     // histogram용 구간 수
+  const [binCount, setBinCount] = useState(10);
+
   const [xAxis, setXAxis] = useState('');
   const [yAxis, setYAxis] = useState('');
-  const [chartOption, setChartOption] = useState();
 
+  /* ▼ 필터 */
+  const [filterVar, setFilterVar] = useState('');
+  const [filterValues, setFilterValues] = useState([]);
+  const [selectedVals, setSelectedVals] = useState(new Set());
 
+  /* ▼ 그룹 */
+  const [groupVar, setGroupVar] = useState('');
 
+  const [chartOption, setChartOption] = useState(null);
+
+  /* ──────────────────── 업로드 ──────────────────── */
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    accept: { 'text/csv': ['.csv'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx', '.xls'] },
+    accept: {
+      'text/csv': ['.csv'],
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': [
+        '.xlsx',
+        '.xls',
+      ],
+    },
     multiple: false,
-    onDrop: async files => {
-      const file = files[0];
+    onDrop: async (files) => {
       const fd = new FormData();
-      fd.append('file', file);
+      fd.append('file', files[0]);
       try {
         const res = await axios.post('http://127.0.0.1:8000/api/upload/', fd, {
-          headers: { 'Content-Type': 'multipart/form-data' }
+          headers: { 'Content-Type': 'multipart/form-data' },
         });
         setRows(res.data.rows);
         setColumns(res.data.columns);
         setRawData(res.data.data || []);
         setError('');
+
+        /* 초기화 */
         setXAxis('');
         setYAxis('');
-        setChartOption(undefined);
+        setFilterVar('');
+        setFilterValues([]);
+        setSelectedVals(new Set());
+        setGroupVar('');
+        setChartOption(null);
       } catch (e) {
         setError(e.response?.data?.file || '업로드 실패');
       }
-    }
+    },
   });
 
-  // drawChart 함수만 발췌
+  /* ──────────────────── 필터 값 동기화 ──────────────────── */
+  useEffect(() => {
+    if (filterVar) {
+      setFilterValues([...new Set(rawData.map((r) => r[filterVar]))]);
+      setSelectedVals(new Set());
+    } else {
+      setFilterValues([]);
+      setSelectedVals(new Set());
+    }
+  }, [filterVar, rawData]);
 
-const drawChart = () => {
-    const data = rawData;
-    // 전체 모드: 그룹 미선택 혹은 그룹 변수와 X축이 같으면 groups = []
-    const groups = (category && category !== xAxis)
-      ? [...new Set(data.map(r => r[category]))]
-      : [];
-  
+  const toggleVal = (v) =>
+    setSelectedVals((prev) => {
+      const next = new Set(prev);
+      next.has(v) ? next.delete(v) : next.add(v);
+      return next;
+    });
+
+  /* ──────────────────── 필터 적용 데이터 ──────────────────── */
+  const filteredData = useMemo(() => {
+    if (filterVar && selectedVals.size > 0) {
+      return rawData.filter((r) => selectedVals.has(r[filterVar]));
+    }
+    return rawData;
+  }, [rawData, filterVar, selectedVals]);
+
+  /* ──────────────────── 차트 그리기 ──────────────────── */
+  const drawChart = () => {
+    const data = filteredData;
     let option;
-  
-    if (chartType === 'histogram') {
-      const { categories, data: histData } = makeHistogram(data.map(r => r[yAxis]), binCount);
+
+    /* 그룹 카테고리 목록 (산점도·선 그래프용) */
+    const groups =
+      groupVar && ['scatter', 'line'].includes(chartType)
+        ? [...new Set(data.map((r) => r[groupVar]))]
+        : [];
+
+    /* ---------- 1. 파이 & 막대 : 범주 빈도 ---------- */
+    if (['pie', 'bar'].includes(chartType)) {
+      const counts = data.reduce((acc, r) => {
+        const key = r[yAxis];
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
+      const cats = Object.keys(counts);
+      const vals = cats.map((k) => counts[k]);
+
+      option =
+        chartType === 'pie'
+          ? {
+              tooltip: {},
+              legend: { data: cats },
+              series: [
+                {
+                  name: yAxis,
+                  type: 'pie',
+                  radius: '55%',
+                  data: cats.map((c) => ({ name: c, value: counts[c] })),
+                },
+              ],
+            }
+          : {
+              xAxis: { type: 'category', data: cats },
+              yAxis: { type: 'value' },
+              series: [{ type: 'bar', data: vals }],
+              tooltip: { trigger: 'axis' },
+              grid: { containLabel: true },
+              legend: { show: false },
+            };
+    }
+
+    /* ---------- 2. 히스토그램 ---------- */
+    else if (chartType === 'histogram') {
+      const { categories, data: hist } = makeHistogram(
+        data.map((r) => r[yAxis]),
+        binCount
+      );
       option = {
         xAxis: { type: 'category', data: categories },
         yAxis: { type: 'value' },
-        series: [{ type: 'bar', data: histData }],
+        series: [{ type: 'bar', data: hist }],
         tooltip: {},
         grid: { containLabel: true },
-        legend: { show: false },          // 범례 숨김
+        legend: { show: false },
       };
     }
+
+    /* ---------- 3. 박스플롯 ---------- */
     else if (chartType === 'boxplot') {
-      const boxData = makeBoxplot(data.map(r => r[yAxis]));
+      const box = makeBoxplot(data.map((r) => r[yAxis]));
       option = {
         xAxis: { type: 'category', data: [''] },
         yAxis: { type: 'value' },
-        series: [{ type: 'boxplot', data: [boxData] }],
+        series: [{ type: 'boxplot', data: [box] }],
         tooltip: {},
         grid: { containLabel: true },
-        legend: { show: false },          // 범례 숨김
+        legend: { show: false },
       };
     }
-    else if (groups.length > 0 && chartType !== 'pie') {
-      // 그룹별 바/선/산점도
-      const xData = [...new Set(data.map(r => r[xAxis]))];
-      const series = groups.map(g => ({
-        name: g,
-        type: chartType,
-        data: xData.map(x =>
-          data.filter(r => r[category] === g && r[xAxis] === x)
-              .map(r => r[yAxis])[0] ?? null
-        )
-      }));
-      option = {
-        xAxis: { type: 'category', data: xData },
-        yAxis: { type: 'value' },
-        series,
-        tooltip: { trigger: 'axis' },
-        legend: { show: true, data: groups },  // 그룹 모드에만 범례 표시
-        grid: { containLabel: true },
-      };
-    }
-    else if (chartType === 'pie' && groups.length > 0) {
-      // 그룹별 파이 차트
-      const agg = groups.map(g => ({
-        name: g,
-        value: data
-          .filter(r => r[category] === g)
-          .reduce((sum, r) => sum + r[yAxis], 0)
-      }));
-      option = {
-        tooltip: {},
-        legend: { show: true, data: groups },
-        series: [{
-          name: yAxis,
-          type: 'pie',
-          radius: '50%',
-          data: agg
-        }]
-      };
-    }
-/* ─────────────────────────────────────────────
-     A) 그룹 + scatter  →  [x,y] 점 배열
-  ───────────────────────────────────────────── */
-  else if (groups.length > 0 && chartType === 'scatter') {
-    const series = groups.map(g => ({
-      name: g,
-      type: 'scatter',
-      data: data
-        .filter(r => r[category] === g)
-        .map(r => [r[xAxis], r[yAxis]]),
-    }));
-    option = {
-      xAxis: { type: 'value', name: xAxis },
-      yAxis: { type: 'value', name: yAxis },
-      series,
-      tooltip: { trigger: 'item' },
-      legend: { data: groups },
-      grid: { containLabel: true },
-    };
-  }
-  /* ─────────────────────────────────────────────
-     B) 그룹 없음 + scatter  →  단일 시리즈 점 배열
-  ───────────────────────────────────────────── */
-  else if (groups.length === 0 && chartType === 'scatter') {
-    option = {
-      xAxis: { type: 'value', name: xAxis },
-      yAxis: { type: 'value', name: yAxis },
-      series: [{
-        type: 'scatter',
-        data: data.map(r => [r[xAxis], r[yAxis]]),
-      }],
-      tooltip: { trigger: 'item' },
-      legend: { show: false },
-      grid: { containLabel: true },
-    };
-  }
-    /* 4. 바로 여기! ▸ bar/line + 그룹 */
-  else if (groups.length > 0 && ['bar','line'].includes(chartType)) {
-    // ⬇⬇ 여기에 붙여 넣으세요 ⬇⬇
-    const xData = [...new Set(data.map(r => r[xAxis]))];
-    const series = groups.map(g => ({
-      name: g,
-      type: chartType,
-      data: xData.map(x => {
-        const ys = data
-          .filter(r => r[category] === g && r[xAxis] === x)
-          .map(r => r[yAxis]);
-        return ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : null; // 평균
-      }),
-    }));
-    option = {
-      xAxis: { type: 'category', data: xData },
-      yAxis: { type: 'value' },
-      series,
-      tooltip: { trigger: 'axis' },
-      legend: { data: groups },
-      grid: { containLabel: true },
-    };
-    }
-    else {
-      // 전체(그룹 미선택)
-      const xData = data.map(r => r[xAxis]);
-      const yData = data.map(r => r[yAxis]);
-      option = {
-        xAxis: { type: 'category', data: xData },
-        yAxis: { type: 'value' },
-        series: [{
-          type: chartType,
-          data: yData
-        }],
-        tooltip: {},
-        grid: { containLabel: true },
-        legend: { show: false },          // 전체 모드에선 범례 숨김
-      };
-    }
-  
-   // drawChart 함수 안 마지막 줄만 교체
-   // 1) 먼저 null 로 초기화
-   setChartOption(null);
-   // 2) 다음 이벤트 루프에서 새 옵션 적용
-   setTimeout(() => setChartOption(option), 0);
 
+    /* ---------- 4. 산점도 ---------- */
+    else if (chartType === 'scatter') {
+      const makeAxis = (name) => ({
+        type: 'value',
+        name,
+        scale: true,
+        min: (v) => v.min - (v.max - v.min) * 0.05,
+        max: (v) => v.max + (v.max - v.min) * 0.05,
+      });
+
+      if (groups.length) {
+        option = {
+          xAxis: makeAxis(xAxis),
+          yAxis: makeAxis(yAxis),
+          tooltip: { trigger: 'item' },
+          legend: { data: groups },
+          grid: { containLabel: true },
+          dataZoom: [{ type: 'inside' }, { type: 'slider', height: 40 }],
+          series: groups.map((g) => ({
+            name: g,
+            type: 'scatter',
+            data: data
+              .filter((r) => r[groupVar] === g)
+              .map((r) => [r[xAxis], r[yAxis]]),
+          })),
+        };
+      } else {
+        option = {
+          xAxis: makeAxis(xAxis),
+          yAxis: makeAxis(yAxis),
+          tooltip: { trigger: 'item' },
+          legend: { show: false },
+          grid: { containLabel: true },
+          dataZoom: [{ type: 'inside' }, { type: 'slider', height: 40 }],
+          series: [
+            {
+              type: 'scatter',
+              data: data.map((r) => [r[xAxis], r[yAxis]]),
+            },
+          ],
+        };
+      }
+    }
+
+    /* ---------- 5. 선 그래프 ---------- */
+    else if (chartType === 'line') {
+      const xCats = [...new Set(data.map((r) => r[xAxis]))];
+      if (groups.length) {
+        const series = groups.map((g) => ({
+          name: g,
+          type: 'line',
+          data: xCats.map(
+            (x) =>
+              data.find((r) => r[xAxis] === x && r[groupVar] === g)?.[yAxis] ??
+              null
+          ),
+        }));
+        option = {
+          xAxis: { type: 'category', data: xCats },
+          yAxis: { type: 'value' },
+          series,
+          tooltip: { trigger: 'axis' },
+          grid: { containLabel: true },
+          legend: { data: groups },
+        };
+      } else {
+        option = {
+          xAxis: { type: 'category', data: xCats },
+          yAxis: { type: 'value' },
+          series: [
+            {
+              type: 'line',
+              data: xCats.map(
+                (x) => data.find((r) => r[xAxis] === x)?.[yAxis] ?? null
+              ),
+            },
+          ],
+          tooltip: { trigger: 'axis' },
+          grid: { containLabel: true },
+          legend: { show: false },
+        };
+      }
+    } else {
+      alert('해당 조합은 지원하지 않습니다.');
+      return;
+    }
+
+    setChartOption(null);
+    setTimeout(() => setChartOption(option), 0);
   };
-  
-  
-  
+
+  /* ──────────────────── UI 헬퍼 ──────────────────── */
+  const needX = ['line', 'scatter'].includes(chartType);
+  const numericCharts = ['histogram', 'boxplot', 'line', 'scatter'];
+  const varLabel =
+    ['pie', 'bar'].includes(chartType) ? '변수(범주형)' : '변수(수치형)';
+
+  const varOptions = columns.filter((c) =>
+    ['pie', 'bar'].includes(chartType)
+      ? c.dtype === 'object'
+      : c.dtype !== 'object'
+  );
+
+  const categoricalCols = columns.filter((c) => c.dtype === 'object');
+
+  /* ──────────────────── 렌더 ──────────────────── */
   return (
-    <div className="p-6 max-w-xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Mini Tableau</h1>
+    <div className="p-6 mx-auto max-w-none">
+      <h1 className="text-3xl font-bold mb-6">Mini Tableau</h1>
+
+      {/* 업로드 */}
       <div
         {...getRootProps()}
         className="border-2 border-dashed rounded-lg p-8 text-center hover:border-blue-500 cursor-pointer"
@@ -213,125 +281,186 @@ const drawChart = () => {
         <input {...getInputProps()} />
         {isDragActive ? '드롭하세요' : 'CSV/Excel 파일 드래그 또는 클릭'}
       </div>
+
       {error && <p className="text-red-500 mt-2">{error}</p>}
+
       {rows !== null && (
         <div className="mt-4">
-          <p>총 행 수: <strong>{rows}</strong></p>
+          <p>
+            총 행 수: <strong>{rows}</strong>
+          </p>
           <ul className="list-disc list-inside">
-            {columns.map(c => (
-              <li key={c.name}>{c.name} ({c.dtype})</li>
+            {columns.map((c) => (
+              <li key={c.name}>
+                {c.name} ({c.dtype})
+              </li>
             ))}
           </ul>
         </div>
       )}
 
-{columns.length > 0 && (
-        <div className="mt-6">
-          <label className="block mb-1 font-medium">차트 유형</label>
-          <select
-            className="border p-1 rounded"
-            value={chartType}
-            onChange={e => setChartType(e.target.value)}
-          >
-            <option value="bar">막대</option>
-            <option value="line">선</option>
-            <option value="scatter">산점도</option>
-            <option value="pie">파이</option>
-            <option value="histogram">히스토그램</option>
-            <option value="boxplot">박스플롯</option>
-          </select>
-        </div>
-      )}
+      {/* 컨트롤 + 차트 */}
+      <div className="flex flex-col lg:flex-row gap-8 mt-6">
+        {/* ───── 컨트롤 ───── */}
+        <div className="w-full lg:w-72 shrink-0 space-y-4">
 
-      {/* 히스토그램 구간 수 입력 */}
-      {chartType === 'histogram' && (
-        <div className="mt-4">
-          <label className="block mb-1">구간(bin) 개수</label>
-          <input
-            type="number"
-            min={1}
-            value={binCount}
-            onChange={e => setBinCount(Number(e.target.value))}
-            className="w-24 border p-1 rounded"
-          />
-        </div>
-      )}
-
-      {/* 변수 선택 (X/Y or Y만) */}
-      {chartType && columns.length > 0 && (
-        <div className="mt-4 grid grid-cols-2 gap-4">
-          {['bar','line','scatter','pie'].includes(chartType) && (
+          {/* 필터 변수 */}
+          {columns.length > 0 && (
             <div>
-              <label className="block mb-1">X축</label>
+              <label className="block mb-1 font-medium">필터 변수(범주형)</label>
               <select
                 className="w-full border p-1 rounded"
-                value={xAxis}
-                onChange={e => setXAxis(e.target.value)}
+                value={filterVar}
+                onChange={(e) => setFilterVar(e.target.value)}
               >
-                <option value="">선택</option>
-                {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                <option value="">없음</option>
+                {categoricalCols.map((c) => (
+                  <option key={c.name} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+
+              {/* 값 토글 */}
+              {filterVar && filterValues.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {filterValues.map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => toggleVal(v)}
+                      className={`px-2 py-1 border rounded transition-colors ${
+                        selectedVals.has(v)
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-100'
+                      }`}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 차트 유형 */}
+          {columns.length > 0 && (
+            <div>
+              <label className="block mb-1 font-medium">차트 유형</label>
+              <select
+                className="border p-1 rounded w-full"
+                value={chartType}
+                onChange={(e) => setChartType(e.target.value)}
+              >
+                <option value="bar">막대 (범주 빈도)</option>
+                <option value="pie">파이 (범주 빈도)</option>
+                <option value="histogram">히스토그램</option>
+                <option value="boxplot">박스플롯</option>
+                <option value="line">선 그래프</option>
+                <option value="scatter">산점도</option>
               </select>
             </div>
           )}
-          <div>
-            <label className="block mb-1">Y축</label>
-            <select
-              className="w-full border p-1 rounded"
-              value={yAxis}
-              onChange={e => setYAxis(e.target.value)}
+
+          {/* 히스토그램 bin 입력 */}
+          {chartType === 'histogram' && (
+            <div>
+              <label className="block mb-1">구간(bin) 개수</label>
+              <input
+                type="number"
+                min={1}
+                value={binCount}
+                onChange={(e) => setBinCount(Number(e.target.value))}
+                className="w-24 border p-1 rounded"
+              />
+            </div>
+          )}
+
+          {/* 변수 선택 */}
+          {columns.length > 0 && (
+            <div className={needX ? 'grid grid-cols-2 gap-4' : ''}>
+              {/* X축 */}
+              {needX && (
+                <div>
+                  <label className="block mb-1">X축</label>
+                  <select
+                    className="w-full border p-1 rounded"
+                    value={xAxis}
+                    onChange={(e) => setXAxis(e.target.value)}
+                  >
+                    <option value="">선택</option>
+                    {columns.map((c) => (
+                      <option key={c.name} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Y축·변수 */}
+              <div className={needX ? '' : 'mt-2'}>
+                <label className="block mb-1">{varLabel}</label>
+                <select
+                  className="w-full border p-1 rounded"
+                  value={yAxis}
+                  onChange={(e) => setYAxis(e.target.value)}
+                >
+                  <option value="">선택</option>
+                  {varOptions.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* 그룹 변수 (산점도·선) */}
+          {['scatter', 'line'].includes(chartType) && (
+            <div>
+              <label className="block mb-1 font-medium">
+                그룹 변수(범주형·옵션)
+              </label>
+              <select
+                className="w-full border p-1 rounded"
+                value={groupVar}
+                onChange={(e) => setGroupVar(e.target.value)}
+              >
+                <option value="">없음</option>
+                {categoricalCols.map((c) => (
+                  <option key={c.name} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* 실행 버튼 */}
+          {columns.length > 0 && (
+            <button
+              className="w-full mt-4 px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
+              disabled={!yAxis || (needX && !xAxis)}
+              onClick={drawChart}
             >
-              <option value="">선택</option>
-              {columns.filter(c => c.dtype !== 'object').map(c => (
-                <option key={c.name} value={c.name}>{c.name}</option>
-              ))}
-            </select>
-          </div>
+              차트 그리기
+            </button>
+          )}
         </div>
-      )}
 
-      {columns.length > 0 && (
-       <div className="mt-4">
-         <label className="block mb-1 font-medium">그룹 변수(범주형)</label>
-         <select
-           className="border p-1 rounded"
-           value={category}
-           onChange={e => setCategory(e.target.value)}
-         >
-           <option value="">전체</option>
-           {columns
-             .filter(c => c.dtype === 'object' && c.name !== xAxis)
-             .map(c => (
-               <option key={c.name} value={c.name}>{c.name}</option>
-             ))
-           }
-         </select>
-       </div>
-     )}
-
-      {/* 차트 그리기 버튼 */}
-      {columns.length > 0 && (
-        <button
-          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
-          disabled={
-            !yAxis ||
-            (['bar','line','scatter','pie'].includes(chartType) && !xAxis)
-          }
-          onClick={drawChart}
-        >
-          차트 그리기
-        </button>
-      )}
-
-      {/* 차트 렌더링 */}
-      {chartOption && (
-        <div className="mt-6">
-          <ReactECharts
-            key="main-chart"   // 또는 chartType 하나만 넣어도 OK
-            option={chartOption}
-            style={{ height: 400 }}
-          />
+        {/* ───── 차트 영역 ───── */}
+        <div className="flex-1 min-w-0">
+          {chartOption && (
+            <ReactECharts
+              key="main-chart"
+              option={chartOption}
+              style={{ width: '100%', height: 600 }}
+            />
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
