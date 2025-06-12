@@ -1,0 +1,11 @@
+/* src/tailwind.css */
+@config "../tailwind.config.cjs";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body { @apply font-body text-gray-800 bg-primary-50; }
+  h1,h2,h3,h4 { @apply font-heading; }
+}

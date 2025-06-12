@@ -439,8 +439,8 @@ export default function UploadChart() {
 
   /* ───────── 렌더 ───────── */
   return (
-    <div className="p-6 mx-auto max-w-none">
-      <h1 className="text-3xl font-bold mb-6">Mini Tableau</h1>
+    <div className="p-6 lg:p-10 max-w-none mx-auto">
+      
 
       {/* 업로드 */}
       <div
@@ -684,11 +684,13 @@ export default function UploadChart() {
         {/* ───── 차트 영역 ───── */}
         <div className="flex-1 min-w-0">
           {chartOption && (
-            <ReactECharts
-              key="main-chart"
-              option={chartOption}
-              style={{ width: '100%', height: 600 }}
-            />
+            <div className="rounded-3xl bg-white shadow-[0_8px_24px_rgba(0,0,0,.06)] p-4">
+              <ReactECharts
+                key="main-chart"
+                option={chartOption}
+                style={{ height: 600 }}
+              />
+            </div>
           )}
         </div>
       </div>
