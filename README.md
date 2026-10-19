@@ -8,7 +8,7 @@
 
 파일 업로드부터 시각화와 전처리까지, 브라우저 하나로 시작하는 데이터 워크스페이스.
 
-[사용 방법](#사용-방법) · [지원 형식](#지원-형식) · [로컬 실행](#로컬-실행) · [배포](#무료-배포) · [이전 버전](https://github.com/dlwo8520/project1_mini_tableau/tree/archive/pre-blue-redesign-20261019)
+[웹에서 사용하기 ↗](https://dlwo8520.github.io/project1_mini_tableau/) · [사용 방법](#사용-방법) · [지원 형식](#지원-형식) · [로컬 실행](#로컬-실행) · [배포](#무료-배포) · [이전 버전](https://github.com/dlwo8520/project1_mini_tableau/tree/archive/pre-blue-redesign-20261019)
 
 </div>
 
