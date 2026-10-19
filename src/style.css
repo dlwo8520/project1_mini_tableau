@@ -2561,3 +2561,24 @@ td {
   border-radius: 6px;
   margin-top: 6px;
 }
+.recommendation-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: -2px 0 18px;
+  padding: 11px 14px;
+  border: 1px solid #dce8f9;
+  border-radius: 8px;
+  background: #eef5ff;
+  color: #6e8db8;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.recommendation-note > svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.recommendation-note strong {
+  font-weight: 650;
+  color: #5279af;
+}

@@ -175,9 +175,58 @@ export function profile(ds: Dataset): Dataset {
       min: count ? min : undefined,
       max: count ? max : undefined,
       mean: field.kind === "number" && count ? sum / count : undefined,
+      identifier: isIdentifierName(field.name),
     };
   });
   return ds;
+}
+// A column name must indicate an identifier; uniqueness alone must never hide a measurement.
+export function isIdentifierName(name: string): boolean {
+  const normalized = name
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .trim();
+  return (
+    /(?:^|[\s_.-])(?:id|uuid|guid|index)(?:$|[\s_.-])/.test(normalized) ||
+    /^unnamed\s*:\s*\d+$/.test(normalized) ||
+    /^(?:(?:row|record|sample|serial|customer|order)[\s_.-]*(?:no|number)|no\.?)$/.test(
+      normalized,
+    ) ||
+    /^(?:(?:고객|주문|샘플|행|일련|회원|상품|제품|사용자)?\s*번호|순번|인덱스)$/.test(
+      normalized,
+    )
+  );
+}
+export const identifierField = (field: Field) =>
+  field.identifier ?? isIdentifierName(field.name);
+export function defaultAggregation(field?: Pick<Field, "name">): Chart["agg"] {
+  if (!field) return "count";
+  const name = field.name.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
+  if (
+    /(?:^|[\s_.-])(?:length|width|height|temperature|pressure|speed|weight|age|score|rating|rate|ratio|percent|price|average|mean)(?:$|[\s_.-])|길이|너비|높이|온도|기온|압력|속도|무게|연령|나이|점수|만족도|비율|평균|단가/.test(
+      name,
+    )
+  )
+    return "mean";
+  // Use mean for unknown physical/continuous measurements; only known additive names opt into sum.
+  return /(?:^|[\s_.-])(?:sales|revenue|amount|cost|expense|profit|quantity|qty|count|orders|units|total)(?:$|[\s_.-])|매출|매입|금액|비용|광고비|수량|건수|주문\s*수|판매\s*수|이익|수익/.test(
+    name,
+  )
+    ? "sum"
+    : "mean";
+}
+export function histogramBins(sorted: number[], requested = 0): number {
+  if (!sorted.length || sorted[0] === sorted.at(-1)) return 1;
+  if (Number.isFinite(requested) && requested > 0)
+    return Math.max(1, Math.min(50, Math.round(requested)));
+  const iqr = quantile(sorted, 0.75)! - quantile(sorted, 0.25)!;
+  const width = (2 * iqr) / Math.cbrt(sorted.length);
+  const estimate =
+    width > 0
+      ? Math.ceil((sorted.at(-1)! - sorted[0]) / width)
+      : Math.ceil(Math.log2(sorted.length) + 1);
+  // Compact first view; users can choose up to 50 bins explicitly. No records are omitted.
+  return Math.max(1, Math.min(12, new Set(sorted).size, estimate));
 }
 export function filtered(ds: Dataset, filters: Filter[]) {
   const specs = filters
@@ -302,7 +351,11 @@ export function buildChart(
   if (config.type === "correlation") {
     const nums = fields
       .map((f, i) => ({ f, i }))
-      .filter(({ f }) => f.kind === "number")
+      .filter(
+        ({ f }) =>
+          f.kind === "number" &&
+          (config.includeIdentifiers || !identifierField(f)),
+      )
       .slice(0, 18);
     const values: (number | null)[][] = [];
     table = [["변수 1", "변수 2", "Pearson r", "유효 쌍"]];
@@ -367,8 +420,16 @@ export function buildChart(
     ];
     note =
       "Pearson · 결측값은 변수 쌍마다 제외 · 상수 열은 계산 불가" +
-      (fields.filter((f) => f.kind === "number").length > 18
+      (fields.filter(
+        (f) =>
+          f.kind === "number" &&
+          (config.includeIdentifiers || !identifierField(f)),
+      ).length > 18
         ? " · 처음 18개 숫자 열"
+        : "") +
+      (!config.includeIdentifiers &&
+      fields.some((f) => f.kind === "number" && identifierField(f))
+        ? " · ID 후보 열 제외"
         : "");
   } else if (config.type === "scatter") {
     if (xi < 0 || yi < 0)
@@ -422,25 +483,33 @@ export function buildChart(
     if (!values.length)
       throw new Error("선택한 범위에 유효한 숫자가 없습니다.");
     if (config.type === "histogram") {
-      const bins = Math.max(
-          1,
-          Math.min(30, Math.ceil(Math.sqrt(values.length))),
-        ),
+      const bins = histogramBins(values, config.bins),
         low = values[0],
         high = values.at(-1)!;
       const width = high === low ? 1 : (high - low) / bins,
         counts = Array(high === low ? 1 : bins).fill(0);
-      values.forEach(
-        (v) =>
-          counts[Math.min(counts.length - 1, Math.floor((v - low) / width))]++,
+      const edges = Array.from({ length: counts.length + 1 }, (_, i) =>
+        high === low ? low : i === counts.length ? high : low + i * width,
       );
+      values.forEach((v) => {
+        // Compare against the actual interval edges. Division alone can put 6.1 in
+        // the preceding 5.65–6.1 bin because (6.1-4.3)/0.45 rounds below 4.
+        let left = 0,
+          right = counts.length;
+        while (left < right) {
+          const mid = Math.floor((left + right) / 2);
+          if (v >= edges[mid + 1]) left = mid + 1;
+          else right = mid;
+        }
+        counts[Math.min(counts.length - 1, left)]++;
+      });
       const labels = counts.map((_, i) =>
         high === low
           ? String(low)
-          : `${+(low + i * width).toPrecision(4)}–${+(low + (i + 1) * width).toPrecision(4)}`,
+          : `${+edges[i].toPrecision(4)}–${+edges[i + 1].toPrecision(4)}`,
       );
       option.xAxis = { ...axis, type: "category", data: labels };
-      option.yAxis = { ...axis, type: "value", minInterval: 1 };
+      option.yAxis = { ...axis, type: "value", minInterval: 1, name: "행 수" };
       option.series = [
         {
           type: "bar",
@@ -452,13 +521,9 @@ export function buildChart(
       ];
       table = [
         ["구간 시작", "구간 끝", "행 수"],
-        ...counts.map((n, i) => [
-          low + i * width,
-          high === low ? low : low + (i + 1) * width,
-          n,
-        ]),
+        ...counts.map((n, i) => [edges[i], edges[i + 1], n]),
       ];
-      note = "오른쪽 끝은 마지막 구간에 포함 · 유효한 숫자만 사용";
+      note = `숫자 분포 · ${config.bins ? "지정" : "자동"} ${counts.length}구간의 행 수 · 오른쪽 끝은 마지막 구간에 포함`;
     } else {
       const q1 = quantile(values, 0.25)!,
         median = quantile(values, 0.5)!,
@@ -613,11 +678,25 @@ export function buildChart(
   return { option, table, note, count };
 }
 export function recommendations(ds: Pick<Dataset, "fields">): Chart[] {
-  const nums = ds.fields.filter((f) => f.kind === "number"),
-    dates = ds.fields.filter((f) => f.kind === "date"),
+  const nums = ds.fields.filter(
+      (f) => f.kind === "number" && !identifierField(f) && f.unique > 0,
+    ),
+    dates = ds.fields.filter((f) => f.kind === "date" && !identifierField(f)),
     cats = ds.fields.filter(
-      (f) => (f.kind === "text" || f.kind === "boolean") && f.unique < 100,
+      (f) =>
+        !identifierField(f) &&
+        (f.kind === "text" ||
+          f.kind === "boolean" ||
+          (f.kind === "number" &&
+            /^(?:(?:species|class|label|category|status|grade|type|group|cluster|code)(?:[\s_.-]*(?:code|label))?|등급|분류|유형|구분|코드)$/i.test(
+              f.name.replace(/([a-z0-9])([A-Z])/g, "$1 $2"),
+            ))) &&
+        f.unique > 1 &&
+        f.unique <= 30,
     );
+  const measures = nums.filter((f) => !cats.includes(f));
+  const measure = measures[0],
+    agg = defaultAggregation(measure);
   const make = (type: Chart["type"], title: string, x = "", y = ""): Chart => ({
     id: crypto.randomUUID(),
     title,
@@ -625,47 +704,53 @@ export function recommendations(ds: Pick<Dataset, "fields">): Chart[] {
     x,
     y,
     group: "",
-    agg: y ? "sum" : "count",
+    agg: y ? defaultAggregation(ds.fields.find((f) => f.id === y)) : "count",
     bucket: dates.some((f) => f.id === x) ? "month" : "none",
     limit: 12,
     horizontal: false,
-    labels: false,
+    labels: !y && cats.some((f) => f.id === x && f.unique <= 12),
     palette: "blue",
+    bins: 0,
   });
   const list: Chart[] = [];
   if (dates.length)
     list.push(
       make(
         "area",
-        `${dates[0].name}에 따른 ${nums[0]?.name ?? "행 수"}`,
+        `${dates[0].name}에 따른 ${measure?.name ?? "행 수"}${measure ? (agg === "sum" ? " 합계" : " 평균") : ""}`,
         dates[0].id,
-        nums[0]?.id,
+        measure?.id,
       ),
     );
-  if (cats.length)
+  if (cats.length && (!dates.length || !measure) && (!measure || agg !== "sum"))
+    list.push(make("bar", `${cats[0].name}별 개수`, cats[0].id));
+  if (cats.length && measure)
     list.push(
       make(
         "bar",
-        `${cats[0].name}별 ${nums[0]?.name ?? "행 수"}`,
+        `${cats[0].name}별 ${measure.name} ${agg === "sum" ? "합계" : "평균"}`,
         cats[0].id,
-        nums[0]?.id,
+        measure.id,
       ),
     );
-  if (nums.length)
-    list.push(make("histogram", `${nums[0].name} 분포`, "", nums[0].id));
-  if (nums.length > 1)
-    list.push(
-      make(
-        "scatter",
-        `${nums[0].name} × ${nums[1].name}`,
-        nums[0].id,
-        nums[1].id,
-      ),
+  if (measure)
+    list.push(make("histogram", `${measure.name} 분포`, "", measure.id));
+  const varying = measures.filter((f) => f.unique > 1);
+  if (varying.length > 1) {
+    const scatter = make(
+      "scatter",
+      `${varying[0].name} × ${varying[1].name}`,
+      varying[0].id,
+      varying[1].id,
     );
+    // A small categorical legend makes observation groups visible without creating many series.
+    if (cats[0] && cats[0].unique <= 12) scatter.group = cats[0].id;
+    list.push(scatter);
+  }
   if (list.length < 3 && cats[1])
     list.push(make("donut", `${cats[1].name} 구성`, cats[1].id));
-  if (!list.length && ds.fields[0])
-    list.push(make("bar", `${ds.fields[0].name} 빈도`, ds.fields[0].id));
+  if (!list.length && cats[0])
+    list.push(make("bar", `${cats[0].name}별 개수`, cats[0].id));
   return list.slice(0, 4);
 }
 // Small arithmetic parser: field references [매출], + - * / and parentheses. No eval.

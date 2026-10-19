@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { version } from "../package.json";
 import {
   Activity,
   ArrowDownToLine,
@@ -18,6 +19,7 @@ import {
   Filter as FilterIcon,
   GitFork,
   Hash,
+  Info,
   LayoutDashboard,
   LoaderCircle,
   Menu,
@@ -41,7 +43,7 @@ import {
   TransformDialog,
 } from "./Dialogs";
 import { request, saveBlob } from "./client";
-import { recommendations } from "./engine";
+import { identifierField, recommendations } from "./engine";
 import type {
   Chart,
   Filter,
@@ -387,13 +389,15 @@ export default function App() {
                   <FieldIcon kind={f.kind} />
                   <span>{f.name}</span>
                   <small>
-                    {f.kind === "number"
-                      ? "123"
-                      : f.kind === "date"
-                        ? "날짜"
-                        : f.kind === "boolean"
-                          ? "T/F"
-                          : "ABC"}
+                    {identifierField(f)
+                      ? "ID"
+                      : f.kind === "number"
+                        ? "123"
+                        : f.kind === "date"
+                          ? "날짜"
+                          : f.kind === "boolean"
+                            ? "T/F"
+                            : "ABC"}
                   </small>
                 </div>
               ))}
@@ -616,6 +620,25 @@ export default function App() {
                       열의 구조로 추천
                     </span>
                   </div>
+                  {dataset.fields.some(identifierField) && (
+                    <div className="recommendation-note">
+                      <Info size={16} />{" "}
+                      <p>
+                        <strong>
+                          {dataset.fields
+                            .filter(identifierField)
+                            .slice(0, 3)
+                            .map((f) => f.name)
+                            .join(", ")}
+                          {dataset.fields.filter(identifierField).length > 3
+                            ? " 등"
+                            : ""}
+                        </strong>
+                        은 ID 후보로 판단해 자동 추천에서 제외했습니다. 원본은
+                        유지되며 차트 편집에서 직접 선택할 수 있습니다.
+                      </p>
+                    </div>
+                  )}
                   <div className={`chart-grid ${viewBusy ? "updating" : ""}`}>
                     {activeCharts.map((c, i) => (
                       <Suspense
@@ -841,7 +864,12 @@ export default function App() {
                                     </span>
                                     <div>
                                       <strong>{f.name}</strong>
-                                      <small>{kindLabel[f.kind]}</small>
+                                      <small>
+                                        {kindLabel[f.kind]}
+                                        {identifierField(f)
+                                          ? " · ID 후보 (자동 추천 제외)"
+                                          : ""}
+                                      </small>
                                     </div>
                                   </div>
                                 </td>
@@ -999,7 +1027,7 @@ export default function App() {
         <footer className="app-footer">
           <span>MINI CAT DATA STUDIO</span>
           <span>데이터에 담긴 가능성을, 누구나.</span>
-          <span>v2.0 · 브라우저 분석</span>
+          <span>v{version} · 브라우저 분석</span>
         </footer>
       </div>
       {notice && (

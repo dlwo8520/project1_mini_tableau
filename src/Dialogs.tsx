@@ -13,6 +13,7 @@ import type { Chart, Filter, ImportOptions, Summary, Transform } from "./types";
 import { chartLabel, defaultImport, kindLabel, uid } from "./types";
 import { extensions } from "./importers";
 import { request } from "./client";
+import { identifierField, recommendations } from "./engine";
 export function Modal({
   title,
   subtitle,
@@ -251,30 +252,38 @@ export function ChartDialog({
   onClose: () => void;
   onSave: (c: Chart) => void;
 }) {
-  const nums = dataset.fields.filter((f) => f.kind === "number");
+  const nums = dataset.fields
+    .filter((f) => f.kind === "number")
+    .sort((a, b) => Number(identifierField(a)) - Number(identifierField(b)));
+  const preferred = nums.filter((f) => !identifierField(f));
   const [c, setC] = useState<Chart>(
-    chart ?? {
-      id: uid(),
-      title: "새 차트",
-      type: "bar",
-      x: dataset.fields[0].id,
-      y: nums[0]?.id ?? "",
-      group: "",
-      agg: nums.length ? "sum" : "count",
-      bucket: "none",
-      limit: 12,
-      horizontal: false,
-      labels: false,
-      palette: "blue",
-    },
+    () =>
+      chart ?? {
+        ...(recommendations(dataset).at(0) ?? {
+          id: "",
+          title: "",
+          type: "bar",
+          x: dataset.fields[0].id,
+          y: preferred[0]?.id ?? "",
+          group: "",
+          agg: "count",
+          bucket: "none",
+          limit: 12,
+          horizontal: false,
+          labels: false,
+          palette: "blue",
+        }),
+        id: uid(),
+        title: "새 차트",
+      },
   );
   const set = (key: keyof Chart, value: unknown) => {
     if (key === "type" && value === "scatter")
       setC({
         ...c,
         type: "scatter",
-        x: nums[0]?.id ?? "",
-        y: nums[1]?.id ?? nums[0]?.id ?? "",
+        x: preferred[0]?.id ?? nums[0]?.id ?? "",
+        y: preferred[1]?.id ?? preferred[0]?.id ?? nums[0]?.id ?? "",
       });
     else if (key === "type" && (value === "histogram" || value === "boxplot"))
       setC({ ...c, type: value, y: c.y || nums[0]?.id || "" });
@@ -331,6 +340,7 @@ export function ChartDialog({
                   .map((f) => (
                     <option key={f.id} value={f.id}>
                       {f.name}
+                      {identifierField(f) ? " · ID 후보" : ""}
                     </option>
                   ))}
               </select>
@@ -348,6 +358,7 @@ export function ChartDialog({
                 {nums.map((f) => (
                   <option key={f.id} value={f.id}>
                     {f.name}
+                    {identifierField(f) ? " · ID 후보" : ""}
                   </option>
                 ))}
               </select>
@@ -429,8 +440,39 @@ export function ChartDialog({
               <option value="violet">블루 바이올렛</option>
             </select>
           </label>
+          {c.type === "histogram" && (
+            <label>
+              히스토그램 구간 수
+              <input
+                type="number"
+                min={0}
+                max={50}
+                step={1}
+                value={c.bins ?? 0}
+                onChange={(e) =>
+                  set(
+                    "bins",
+                    Math.max(
+                      0,
+                      Math.min(50, Math.round(Number(e.target.value))),
+                    ),
+                  )
+                }
+              />
+            </label>
+          )}
         </div>
         <div className="check-options">
+          {c.type === "correlation" && (
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={c.includeIdentifiers ?? false}
+                onChange={(e) => set("includeIdentifiers", e.target.checked)}
+              />
+              ID 후보 열도 포함
+            </label>
+          )}
           {c.type === "bar" && (
             <label className="check-row">
               <input
@@ -450,6 +492,23 @@ export function ChartDialog({
             값 표시
           </label>
         </div>
+        {c.type === "histogram" && (
+          <p className="form-help">
+            0은 자동입니다 (최대 12구간). 직접 지정하면 1~50구간으로 나누어 모든
+            유효한 값을 셉니다. 범주별 개수는 막대 차트에서 X축을 범주 열, 집계
+            방식을 행 수로 선택하세요.
+          </p>
+        )}
+        {dataset.fields.some(
+          (f) =>
+            (f.id === c.y || (c.type === "scatter" && f.id === c.x)) &&
+            identifierField(f),
+        ) && (
+          <p className="form-help">
+            ID 후보 열을 직접 선택했습니다. ID의 합계·평균·분포는 측정값의
+            통계와 의미가 다를 수 있습니다.
+          </p>
+        )}
         <p className="form-help">
           막대·도넛은 집계값 내림차순, 날짜·선·영역은 X축 순서로 표시합니다.
           필터는 모든 차트에 함께 적용됩니다.

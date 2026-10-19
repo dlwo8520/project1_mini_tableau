@@ -11,6 +11,7 @@ export type Field = {
   max?: number;
   mean?: number;
   examples: string[];
+  identifier?: boolean;
 };
 export type Dataset = {
   id: string;
@@ -47,6 +48,8 @@ export type Chart = {
   horizontal: boolean;
   labels: boolean;
   palette: string;
+  bins?: number;
+  includeIdentifiers?: boolean;
 };
 export type Filter = {
   id: string;
